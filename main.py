@@ -1,15 +1,24 @@
-from typing import Union
-
 from fastapi import FastAPI
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+DATABASE_URL = "postgresql://app:app@localhost:5432/app"
+
+def get_db():
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    return conn
+
 
 app = FastAPI()
 
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
-
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}
+@app.get("/ads")
+def read_ads():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM ads")
+            items = cursor.fetchall()
+            return items
+    finally:
+        conn.close()
