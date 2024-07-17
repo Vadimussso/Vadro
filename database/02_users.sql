@@ -1,0 +1,9 @@
+CREATE TABLE users (
+	id SERIAL PRIMARY KEY,
+	email TEXT UNIQUE NOT NULL,
+	name TEXT NOT NULL,
+	surname TEXT NOT NULL,
+	password TEXT NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE,
+	is_admin BOOL NOT NULL
+);
