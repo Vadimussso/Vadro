@@ -1,7 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import json
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
@@ -46,7 +45,7 @@ def read_ad(item_id, db=Depends(get_db)):
 
 
 @app.post("/users/registration")
-async def registration(user: User, db=Depends(get_db)):
+def registration(user: User, db=Depends(get_db)):
     with db.cursor() as cursor:
         cursor.execute(
             "INSERT INTO users (email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s)",
@@ -56,4 +55,23 @@ async def registration(user: User, db=Depends(get_db)):
     return {"message": "User registered successfully"}
 
 
+class LogIn(BaseModel):
+    email: str
+    password: str
 
+
+@app.post("/users/login")
+def login(login: LogIn, db=Depends(get_db)):
+    with db.cursor() as cursor:
+        # вытащить из базы token по логину и поролю
+        cursor.execute(
+            "SELECT token FROM users WHERE email = %s AND password = %s",
+            (login.email, login.password)
+        )
+        res = cursor.fetchone()
+        # если ничего не вернулось то возвращаем ошибку
+
+        if res is None:
+            raise HTTPException(status_code=400, detail="Wrong email or password")
+        # иначе возвращаем токен
+        return res
