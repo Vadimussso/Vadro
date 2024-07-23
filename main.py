@@ -3,6 +3,15 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
 from datetime import datetime
+from pydantic import BaseModel, EmailStr
+
+
+class User(BaseModel):
+    email: EmailStr
+    name: str
+    surname: str
+    password: str
+
 
 DATABASE_URL = "postgresql://app:app@localhost:5432/app"
 
@@ -37,16 +46,14 @@ def read_ad(item_id, db=Depends(get_db)):
 
 
 @app.post("/users/registration")
-async def registration(request: Request, db=Depends(get_db)):
-    body = await request.body()
-    data = json.loads(body)
+async def registration(user: User, db=Depends(get_db)):
     with db.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO users(email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s)",
-            (data['email'], data['name'], data['surname'], data['password'], datetime.now(), False)
+            "INSERT INTO users (email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s)",
+            (user.email, user.name, user.surname, user.password, datetime.now(), False)
         )
         db.commit()
-    return "registrated"
+    return {"message": "User registered successfully"}
 
 
 
