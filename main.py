@@ -69,9 +69,10 @@ def login(login: LogIn, db=Depends(get_db)):
             (login.email, login.password)
         )
         res = cursor.fetchone()
-        # если ничего не вернулось то возвращаем ошибку
+    # если ничего не вернулось то возвращаем ошибку
 
-        if res is None:
-            raise HTTPException(status_code=400, detail="Wrong email or password")
-        # иначе возвращаем токен
-        return res
+    if res is None:
+        raise HTTPException(status_code=400, detail="Wrong email or password")
+    # иначе возвращаем токен
+    return res
+
