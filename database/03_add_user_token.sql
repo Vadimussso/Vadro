@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN token text NOT NULL DEFAULT MD5(RANDOM()::text);
