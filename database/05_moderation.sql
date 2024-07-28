@@ -1,0 +1,1 @@
+ALTER TABLE ads ADD COLUMN is_moderated bool DEFAULT false NOT NULL;
