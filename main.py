@@ -63,16 +63,73 @@ class LogIn(BaseModel):
 @app.post("/users/login")
 def login(login: LogIn, db=Depends(get_db)):
     with db.cursor() as cursor:
-        # вытащить из базы token по логину и поролю
+        # pull token from the database using login and password
         cursor.execute(
             "SELECT token FROM users WHERE email = %s AND password = %s",
             (login.email, login.password)
         )
         res = cursor.fetchone()
-    # если ничего не вернулось то возвращаем ошибку
 
+    # if nothing is returned then we return an error
     if res is None:
         raise HTTPException(status_code=400, detail="Wrong email or password")
-    # иначе возвращаем токен
+    # otherwise we return the token
     return res
+
+
+class Ad(BaseModel):
+    vin: str
+    vrc: str
+    license_plate: str
+    brand: str
+    model: str
+    mileage: int
+    engine_capacity: int
+    price: int
+    description: str
+    city: str
+    phone: str
+
+
+class Token(BaseModel):
+    token: str
+
+
+
+@app.post("/ads")
+def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
+    with db.cursor() as cursor:
+        # check whether the person is registered
+        cursor.execute(
+            "SELECT id FROM users WHERE token = %s",
+            (token.token,)
+        )
+        user = cursor.fetchone()
+
+    # if no id and person is not registered return Error
+    if user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # if id exist, ad applying is carry on
+    with db.cursor() as cursor:
+        # attempt to apply the ad:
+        cursor.execute(
+            """
+            INSERT INTO ads (
+                created_at, vin, vrc, license_plate, brand, model, mileage, 
+                engine_capacity, price, description, city, phone, posted_at, author_id
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                datetime.now(), ad.vin, ad.vrc, ad.license_plate, ad.brand,
+                ad.model, ad.mileage, ad.engine_capacity, ad.price,
+                ad.description, ad.city, ad.phone, datetime.now(), user["id"]
+            )
+        )
+        db.commit()
+
+    return {"message": "Ad applied successfully"}
+
 
