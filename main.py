@@ -15,6 +15,21 @@ class User(BaseModel):
 DATABASE_URL = "postgresql://app:app@localhost:5432/app"
 
 
+class Car(BaseModel):
+    vin: str
+    vrc: str
+    license_plate: str
+    brand: str
+    model: str
+    mileage: int
+    engine_capacity: int
+    price: int
+    description: str
+    city: str
+    phone: str
+    posted_at: str
+
+
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     try:
@@ -29,7 +44,11 @@ app = FastAPI()
 @app.get("/ads")
 def read_ads(db=Depends(get_db)):
     with db.cursor() as cursor:
-        cursor.execute("SELECT * FROM ads")
+        cursor.execute(
+            """SELECT vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
+            FROM ads
+            WHERE is_moderated = true
+            """)
         items = cursor.fetchall()
         return items
 
@@ -37,7 +56,11 @@ def read_ads(db=Depends(get_db)):
 @app.get("/ads/{item_id}")
 def read_ad(item_id, db=Depends(get_db)):
     with db.cursor() as cursor:
-        cursor.execute("SELECT * FROM ads WHERE id = %s", [item_id])
+        cursor.execute(
+            """SELECT vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
+             FROM ads 
+             WHERE id = %s AND is_moderated = true
+             """, [item_id])
         item = cursor.fetchone()
         if item is None:
             raise HTTPException(status_code=404, detail="Item not found")
@@ -95,7 +118,6 @@ class Token(BaseModel):
     token: str
 
 
-
 @app.post("/ads")
 def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
     with db.cursor() as cursor:
@@ -131,5 +153,38 @@ def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
         db.commit()
 
     return {"message": "Ad applied successfully"}
+
+
+@app.post("/ads/{item_id}/moderate")
+def moderate(item_id, token: Token, db=Depends(get_db)):
+    with db.cursor() as cursor:
+        # check whether the user is registered and is_admin
+        cursor.execute(
+            """
+            SELECT id FROM users 
+            WHERE token = %s AND is_admin = true
+            """,
+            (token.token,)
+        )
+        user = cursor.fetchone()
+
+    # if nothing is returned, an error is returned.
+    if user is None:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # if id exists, moderation is allowed
+    with db.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE ads SET is_moderated = true
+            WHERE id = %s
+            """,
+            [item_id]
+        )
+
+        db.commit()
+
+    return {"message": "moderation_completed"}
+
 
 
