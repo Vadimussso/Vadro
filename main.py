@@ -30,6 +30,31 @@ class Car(BaseModel):
     posted_at: str
 
 
+class CurrentUser(BaseModel):
+    id: int
+    email: str
+    name: str
+    surname: str
+    is_admin: bool
+
+
+def fetch_user(db, token: str) -> None | CurrentUser:
+    with db.cursor() as cursor:
+        # check whether the user is registered and is_admin
+        cursor.execute(
+            """
+            SELECT id, email, name, surname, is_admin FROM users 
+            WHERE token = %s
+            """,
+            (token,)
+        )
+        user = cursor.fetchone()
+
+    if user is None:
+        return
+    return CurrentUser(**user)
+
+
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     try:
@@ -120,13 +145,8 @@ class Token(BaseModel):
 
 @app.post("/ads")
 def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
-    with db.cursor() as cursor:
-        # check whether the person is registered
-        cursor.execute(
-            "SELECT id FROM users WHERE token = %s",
-            (token.token,)
-        )
-        user = cursor.fetchone()
+
+    user = fetch_user(db, token.token)
 
     # if no id and person is not registered return Error
     if user is None:
@@ -147,7 +167,7 @@ def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
             (
                 datetime.now(), ad.vin, ad.vrc, ad.license_plate, ad.brand,
                 ad.model, ad.mileage, ad.engine_capacity, ad.price,
-                ad.description, ad.city, ad.phone, datetime.now(), user["id"]
+                ad.description, ad.city, ad.phone, datetime.now(), user.id
             )
         )
         db.commit()
@@ -157,19 +177,11 @@ def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
 
 @app.post("/ads/{item_id}/moderate")
 def moderate(item_id, token: Token, db=Depends(get_db)):
-    with db.cursor() as cursor:
-        # check whether the user is registered and is_admin
-        cursor.execute(
-            """
-            SELECT id FROM users 
-            WHERE token = %s AND is_admin = true
-            """,
-            (token.token,)
-        )
-        user = cursor.fetchone()
+
+    user = fetch_user(db, token.token)
 
     # if nothing is returned, an error is returned.
-    if user is None:
+    if user is None or user.is_admin is False:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # if id exists, moderation is allowed
