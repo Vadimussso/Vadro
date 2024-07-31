@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
@@ -11,6 +12,8 @@ class User(BaseModel):
     surname: str
     password: str
 
+
+auth_scheme = HTTPBearer()
 
 DATABASE_URL = "postgresql://app:app@localhost:5432/app"
 
@@ -139,14 +142,10 @@ class Ad(BaseModel):
     phone: str
 
 
-class Token(BaseModel):
-    token: str
-
-
 @app.post("/ads")
-def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
+def add_ad(ad: Ad, security: HTTPAuthorizationCredentials = Depends(auth_scheme), db=Depends(get_db)):
 
-    user = fetch_user(db, token.token)
+    user = fetch_user(db, security.credentials)
 
     # if no id and person is not registered return Error
     if user is None:
@@ -176,9 +175,9 @@ def add_ad(ad: Ad, token: Token, db=Depends(get_db)):
 
 
 @app.post("/ads/{item_id}/moderate")
-def moderate(item_id, token: Token, db=Depends(get_db)):
+def moderate(item_id, security: HTTPAuthorizationCredentials = Depends(auth_scheme), db=Depends(get_db)):
 
-    user = fetch_user(db, token.token)
+    user = fetch_user(db, security.credentials)
 
     # if nothing is returned, an error is returned.
     if user is None or user.is_admin is False:
