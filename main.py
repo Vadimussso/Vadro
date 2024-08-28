@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -68,6 +68,22 @@ def get_db():
 
 app = FastAPI()
 
+
+@app.middleware("http")
+async def add_user(request: Request, call_next):
+    security: HTTPAuthorizationCredentials = await auth_scheme(request)
+    if not security.credentials:
+        return await call_next(request)
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    try:
+        user = fetch_user(conn, security.credentials)
+    finally:
+        conn.close()
+
+    request.state.user = user
+    response = await call_next(request)
+
+    return response
 
 @app.get("/ads")
 def read_ads(db=Depends(get_db)):
@@ -143,12 +159,11 @@ class Ad(BaseModel):
 
 
 @app.post("/ads")
-def add_ad(ad: Ad, security: HTTPAuthorizationCredentials = Depends(auth_scheme), db=Depends(get_db)):
+def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
 
-    user = fetch_user(db, security.credentials)
 
     # if no id and person is not registered return Error
-    if user is None:
+    if request.state.user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # if id exist, ad applying is carry on
@@ -166,7 +181,7 @@ def add_ad(ad: Ad, security: HTTPAuthorizationCredentials = Depends(auth_scheme)
             (
                 datetime.now(), ad.vin, ad.vrc, ad.license_plate, ad.brand,
                 ad.model, ad.mileage, ad.engine_capacity, ad.price,
-                ad.description, ad.city, ad.phone, datetime.now(), user.id
+                ad.description, ad.city, ad.phone, datetime.now(), request.state.user.id
             )
         )
         db.commit()
