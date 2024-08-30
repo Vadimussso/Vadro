@@ -71,9 +71,20 @@ app = FastAPI()
 
 @app.middleware("http")
 async def add_user(request: Request, call_next):
-    security: HTTPAuthorizationCredentials = await auth_scheme(request)
-    if not security.credentials:
+
+    request.state.user = None
+    # getting credentials using auth_scheme
+    try:
+        security: HTTPAuthorizationCredentials = await auth_scheme(request)
+        if not security.credentials:
+            # if there is no token, or it is empty, pass the request further
+            return await call_next(request)
+    # check
+    except HTTPException:
+        # if there is no Authorization header:
         return await call_next(request)
+
+    # If there is token, connect to db
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     try:
         user = fetch_user(conn, security.credentials)
@@ -81,9 +92,10 @@ async def add_user(request: Request, call_next):
         conn.close()
 
     request.state.user = user
-    response = await call_next(request)
 
+    response = await call_next(request)
     return response
+
 
 @app.get("/ads")
 def read_ads(db=Depends(get_db)):
@@ -161,7 +173,6 @@ class Ad(BaseModel):
 @app.post("/ads")
 def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
 
-
     # if no id and person is not registered return Error
     if request.state.user is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -190,12 +201,23 @@ def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
 
 
 @app.post("/ads/{item_id}/moderate")
-def moderate(item_id, security: HTTPAuthorizationCredentials = Depends(auth_scheme), db=Depends(get_db)):
+def moderate(item_id: int, request: Request, db=Depends(get_db)):
 
-    user = fetch_user(db, security.credentials)
+    # Check id the ad exists
+    with db.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT id FROM ads WHERE id = %s
+            """,
+            [item_id]
+        )
+        ad = cursor.fetchone()
+
+    if ad is None:
+        raise HTTPException(status_code=404, detail="Item not found")
 
     # if nothing is returned, an error is returned.
-    if user is None or user.is_admin is False:
+    if request.state.user is None or request.state.user.is_admin is False:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # if id exists, moderation is allowed
