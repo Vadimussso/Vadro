@@ -1,6 +1,25 @@
 version: '3'
 
+dotenv: ['.env']
+
 tasks:
   run:
     cmds:
       - fastapi dev main.py
+
+  migrate.new:
+    cmds:
+      - migrate create -ext sql -dir ./migrations -seq -digits 3 {{.CLI_ARGS}}
+
+  migrate.up:
+    cmds:
+      - migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" up {{.CLI_ARGS}}
+
+  migrate.down:
+    cmds:
+      -  migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" down {{.CLI_ARGS}}
+
+  migrate.force:
+    cmds:
+      - migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" force {{.CLI_ARGS}}
+

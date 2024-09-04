@@ -4,6 +4,9 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
+from config import settings
+
+app = FastAPI()
 
 
 class User(BaseModel):
@@ -14,8 +17,6 @@ class User(BaseModel):
 
 
 auth_scheme = HTTPBearer()
-
-DATABASE_URL = "postgresql://app:app@localhost:5432/app"
 
 
 class Car(BaseModel):
@@ -59,14 +60,11 @@ def fetch_user(db, token: str) -> None | CurrentUser:
 
 
 def get_db():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
     try:
         yield conn
     finally:
         conn.close()
-
-
-app = FastAPI()
 
 
 @app.middleware("http")
@@ -85,7 +83,7 @@ async def add_user(request: Request, call_next):
         return await call_next(request)
 
     # If there is token, connect to db
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
     try:
         user = fetch_user(conn, security.credentials)
     finally:

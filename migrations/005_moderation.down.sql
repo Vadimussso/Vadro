@@ -1,0 +1,1 @@
+ALTER TABLE ads DROP COLUMN IF EXISTS is_moderated;
