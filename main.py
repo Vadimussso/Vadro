@@ -70,16 +70,17 @@ def get_db():
 @app.middleware("http")
 async def add_user(request: Request, call_next):
 
+    # Initialize the user in the request state
     request.state.user = None
-    # getting credentials using auth_scheme
+
     try:
+        # Try to retrieve credentials using the auth scheme
         security: HTTPAuthorizationCredentials = await auth_scheme(request)
         if not security.credentials:
             # if there is no token, or it is empty, pass the request further
             return await call_next(request)
-    # check
     except HTTPException:
-        # if there is no Authorization header:
+        # If the Authorization header is missing or invalid, continue without raising an error
         return await call_next(request)
 
     # If there is token, connect to db

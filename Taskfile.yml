@@ -13,13 +13,23 @@ tasks:
 
   migrate.up:
     cmds:
-      - migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" up {{.CLI_ARGS}}
+      - migrate -path ./migrations -database $DATABASE_URL up {{.CLI_ARGS}}
 
   migrate.down:
     cmds:
-      -  migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" down {{.CLI_ARGS}}
+      -  migrate -path ./migrations -database $DATABASE_URL down {{.CLI_ARGS}}
 
   migrate.force:
     cmds:
-      - migrate -path ./migrations -database "$(python -c 'from config import CURRENT_DATABASE_URL; print(CURRENT_DATABASE_URL)')" force {{.CLI_ARGS}}
+      - migrate -path ./migrations -database $DATABASE_URL force {{.CLI_ARGS}}
 
+  start.aider:
+    cmds:
+      - aider --4o --openai-api-key $GPT_KEY
+
+  test.main:
+    dotenv: ['.env_test']
+    cmds:
+      - migrate -path ./migrations -database $DATABASE_URL up {{.CLI_ARGS}}
+      - pytest tests/test_main.py
+      - migrate -path ./migrations -database $DATABASE_URL down {{.CLI_ARGS}}
