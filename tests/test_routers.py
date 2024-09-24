@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 from main import app
 
+
 client = TestClient(app)
 
 
@@ -10,15 +11,20 @@ def test_read_ads():
     assert isinstance(response.json(), list)
 
 
-def test_registration():
+def read_ad():
+    response = client.get("/ads/1")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_registration(user_data):
     response = client.post(
         "/users/registration",
-        json={
-            "email": "test@example.com",
-            "name": "Test",
-            "surname": "User",
-            "password": "securepassword"
-        }
+        json=user_data
     )
     assert response.status_code == 200
     assert response.json() == {"message": "User registered successfully"}
+
+
+def test_login():
+    response = client.post()

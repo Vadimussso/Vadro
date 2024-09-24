@@ -16,6 +16,10 @@ class User(BaseModel):
     password: str
 
 
+class UserFull(User):
+    is_admin: bool
+
+
 auth_scheme = HTTPBearer()
 
 
@@ -65,6 +69,18 @@ def get_db():
         yield conn
     finally:
         conn.close()
+
+
+def make_user(user: UserFull, db):
+    with db.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO users (email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, token",
+            (user.email, user.name, user.surname, user.password, datetime.now(), user.is_admin)
+        )
+        db.commit()
+
+        user = cursor.fetchone()
+    return user
 
 
 @app.middleware("http")
