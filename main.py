@@ -8,22 +8,31 @@ from config import settings
 
 app = FastAPI()
 
-
-class User(BaseModel):
-    email: EmailStr
-    name: str
-    surname: str
-    password: str
-
-
-class UserFull(User):
-    is_admin: bool
-
-
 auth_scheme = HTTPBearer()
 
 
-class Car(BaseModel):
+class UserBase(BaseModel):
+    email: EmailStr
+    name: str
+    surname: str
+
+
+class UserCreate(UserBase):
+    password: str
+    is_admin: bool
+
+
+class User(UserBase):
+    id: int
+    is_admin: bool
+
+
+class LogIn(BaseModel):
+    email: str
+    password: str
+
+
+class Ad(BaseModel):
     vin: str
     vrc: str
     license_plate: str
@@ -35,32 +44,6 @@ class Car(BaseModel):
     description: str
     city: str
     phone: str
-    posted_at: str
-
-
-class CurrentUser(BaseModel):
-    id: int
-    email: str
-    name: str
-    surname: str
-    is_admin: bool
-
-
-def fetch_user(db, token: str) -> None | CurrentUser:
-    with db.cursor() as cursor:
-        # check whether the user is registered and is_admin
-        cursor.execute(
-            """
-            SELECT id, email, name, surname, is_admin FROM users 
-            WHERE token = %s
-            """,
-            (token,)
-        )
-        user = cursor.fetchone()
-
-    if user is None:
-        return
-    return CurrentUser(**user)
 
 
 def get_db():
@@ -71,16 +54,49 @@ def get_db():
         conn.close()
 
 
-def make_user(user: UserFull, db):
+def make_user(user: UserCreate, db):
     with db.cursor() as cursor:
         cursor.execute(
-            "INSERT INTO users (email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, token",
-            (user.email, user.name, user.surname, user.password, datetime.now(), user.is_admin)
+            """INSERT INTO users (email, name, surname, password, is_admin, created_at) 
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, email, name, surname, is_admin""",
+            (user.email, user.name, user.surname, user.password, user.is_admin, datetime.now())
         )
         db.commit()
 
-        user = cursor.fetchone()
-    return user
+        created_user = cursor.fetchone()
+    return User(**created_user)
+
+
+@app.post("/users/registration")
+def registration(user: UserCreate, db=Depends(get_db)):
+    new_user = make_user(user, db)
+    return {"user_id": new_user.id, "message": "User registered successfully"}
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials):
+
+    token = credentials.credentials
+
+    conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
+
+    try:
+        with conn.cursor() as cursor:
+            # check whether the user is registered
+            cursor.execute(
+                """
+                SELECT id, email, name, surname, is_admin FROM users 
+                WHERE token = %s
+                """,
+                (token,)
+            )
+            user_data = cursor.fetchone()
+    finally:
+        conn.close()
+
+    if user_data is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    return User(**user_data)
 
 
 @app.middleware("http")
@@ -89,24 +105,13 @@ async def add_user(request: Request, call_next):
     # Initialize the user in the request state
     request.state.user = None
 
-    try:
-        # Try to retrieve credentials using the auth scheme
-        security: HTTPAuthorizationCredentials = await auth_scheme(request)
-        if not security.credentials:
-            # if there is no token, or it is empty, pass the request further
-            return await call_next(request)
-    except HTTPException:
-        # If the Authorization header is missing or invalid, continue without raising an error
-        return await call_next(request)
-
-    # If there is token, connect to db
-    conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
-    try:
-        user = fetch_user(conn, security.credentials)
-    finally:
-        conn.close()
-
-    request.state.user = user
+    if "Authorization" in request.headers:
+        credentials: HTTPAuthorizationCredentials = await auth_scheme(request)
+        try:
+            user = get_current_user(credentials)
+            request.state.user = user
+        except HTTPException:
+            pass
 
     response = await call_next(request)
     return response
@@ -138,22 +143,6 @@ def read_ad(item_id, db=Depends(get_db)):
         return item
 
 
-@app.post("/users/registration")
-def registration(user: User, db=Depends(get_db)):
-    with db.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO users (email, name, surname, password, created_at, is_admin) VALUES (%s, %s, %s, %s, %s, %s)",
-            (user.email, user.name, user.surname, user.password, datetime.now(), False)
-        )
-        db.commit()
-    return {"message": "User registered successfully"}
-
-
-class LogIn(BaseModel):
-    email: str
-    password: str
-
-
 @app.post("/users/login")
 def login(login: LogIn, db=Depends(get_db)):
     with db.cursor() as cursor:
@@ -169,20 +158,6 @@ def login(login: LogIn, db=Depends(get_db)):
         raise HTTPException(status_code=400, detail="Wrong email or password")
     # otherwise we return the token
     return res
-
-
-class Ad(BaseModel):
-    vin: str
-    vrc: str
-    license_plate: str
-    brand: str
-    model: str
-    mileage: int
-    engine_capacity: int
-    price: int
-    description: str
-    city: str
-    phone: str
 
 
 @app.post("/ads")
@@ -202,7 +177,7 @@ def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
                 engine_capacity, price, description, city, phone, posted_at, author_id
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-            )
+            ) RETURNING id
             """,
             (
                 datetime.now(), ad.vin, ad.vrc, ad.license_plate, ad.brand,
@@ -212,7 +187,9 @@ def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
         )
         db.commit()
 
-    return {"message": "Ad applied successfully"}
+        add_id = cursor.fetchone()['id']
+
+    return {"message": "Ad applied successfully", "id": add_id}
 
 
 @app.post("/ads/{item_id}/moderate")
@@ -232,7 +209,7 @@ def moderate(item_id: int, request: Request, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
 
     # if nothing is returned, an error is returned.
-    if request.state.user is None or request.state.user.is_admin is False:
+    if request.state.user is None or not request.state.user.is_admin:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # if id exists, moderation is allowed

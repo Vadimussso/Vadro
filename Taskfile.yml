@@ -30,6 +30,9 @@ tasks:
   test.main:
     dotenv: ['.env_test']
     cmds:
+      - yes | migrate -path ./migrations -database $DATABASE_URL down {{.CLI_ARGS}}
+
       - migrate -path ./migrations -database $DATABASE_URL up {{.CLI_ARGS}}
-      - pytest tests/test_main.py
-      - migrate -path ./migrations -database $DATABASE_URL down {{.CLI_ARGS}}
+      - pytest -v -s tests/test_ad.py
+      - pytest -v -s tests/test_user.py
+      - yes | migrate -path ./migrations -database $DATABASE_URL down {{.CLI_ARGS}}
