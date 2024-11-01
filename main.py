@@ -5,6 +5,7 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from config import settings
+from typing import Protocol
 
 app = FastAPI()
 
@@ -189,21 +190,30 @@ def insert_ad(user_id: int, ad: Ad, db) -> int:
         return cursor.fetchone()['id']
 
 
-def service_add_ad(user_id: int | None, ad: Ad, db) -> int:
+class AdService():
+    def __init__(self, db=Depends(get_db)):
+        self.db = db
 
-    if user_id is None:
-        raise UserRequiredError()
+    def add_ad(self, user_id: int | None, ad: Ad) -> int:
 
-    return insert_ad(user_id, ad, db)
+        if user_id is None:
+            raise UserRequiredError()
+
+        return insert_ad(user_id, ad, self.db)
+
+
+class AdServiceProtocol(Protocol):
+    def add_ad(self, user_id: int | None, ad: Ad) -> int:
+        pass
 
 
 @app.post("/ads")
-def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
+def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdService)):
 
     user_id = getattr(request.state.user, 'id', None)
 
     try:
-        ad_id = service_add_ad(user_id, ad, db)
+        ad_id = ad_service.add_ad(user_id, ad)
     except UserRequiredError:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
