@@ -160,13 +160,12 @@ def login(login: LogIn, db=Depends(get_db)):
     return res
 
 
-@app.post("/ads")
-def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
+class UserRequiredError(ValueError):
+    def __init__(self, message="User ID is required"):
+        super().__init__(message)
 
-    # if no id and person is not registered return Error
-    if request.state.user is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
+def insert_ad(user_id: int, ad: Ad, db) -> int:
     # if id exist, ad applying is carry on
     with db.cursor() as cursor:
         # attempt to apply the ad:
@@ -182,14 +181,33 @@ def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
             (
                 datetime.now(), ad.vin, ad.vrc, ad.license_plate, ad.brand,
                 ad.model, ad.mileage, ad.engine_capacity, ad.price,
-                ad.description, ad.city, ad.phone, datetime.now(), request.state.user.id
+                ad.description, ad.city, ad.phone, datetime.now(), user_id
             )
         )
         db.commit()
 
-        add_id = cursor.fetchone()['id']
+        return cursor.fetchone()['id']
 
-    return {"message": "Ad applied successfully", "id": add_id}
+
+def service_add_ad(user_id: int | None, ad: Ad, db) -> int:
+
+    if user_id is None:
+        raise UserRequiredError()
+
+    return insert_ad(user_id, ad, db)
+
+
+@app.post("/ads")
+def add_ad(ad: Ad, request: Request, db=Depends(get_db)):
+
+    user_id = getattr(request.state.user, 'id', None)
+
+    try:
+        ad_id = service_add_ad(user_id, ad, db)
+    except UserRequiredError:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return {"message": "Ad applied successfully", "id": ad_id}
 
 
 @app.post("/ads/{item_id}/moderate")
