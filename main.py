@@ -198,19 +198,32 @@ class AdRepo:
 
             return cursor.fetchone()['id']
 
-    def fetch_ad_data(self, ad_id: int, only_moderated: bool = False) -> dict | None:
+    def fetch_ad_data(self, ad_id: int | None = None, only_moderated: bool = False) -> list | dict:
         query = """
             SELECT id, vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
                  FROM ads 
-                 WHERE id = %s
             """
 
+        params = []
+        conditions = []
+
+        if ad_id is not None:
+            conditions.append("id = %s")
+            params.append(ad_id)
+
         if only_moderated:
-            query += " AND is_moderated = true"
+            conditions.append("is_moderated = true")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         with self.db.cursor() as cursor:
-            cursor.execute(query, [ad_id])
-            item = cursor.fetchone()
+            cursor.execute(query, params)
+
+            if ad_id:
+                item = cursor.fetchone()
+            else:
+                item = cursor.fetchall()
 
         return item
 
@@ -231,7 +244,7 @@ class AdRepoProtocol(Protocol):
     def insert_ad(self, user_id: int, ad: Ad) -> int:
         pass
 
-    def fetch_ad_data(self, ad_id: int, only_moderated: bool = False) -> dict | None:
+    def fetch_ad_data(self, ad_id: int | None, only_moderated: bool = False) -> list | dict:
         pass
 
     def moderate(self, item_id: int) -> None:
@@ -249,6 +262,15 @@ class AdService:
             raise UserRequiredError()
 
         return self.ad_repo.insert_ad(user_id, ad)
+
+    def read_ads(self, ad_id: int | None = None, only_moderated: bool = False) -> list | dict:
+
+        items = self.ad_repo.fetch_ad_data(ad_id, only_moderated)
+
+        if items is None:
+            raise ItemRequiredError()
+
+        return items
 
     def moderate(self, user: User | None, item_id: int) -> None:
 
@@ -277,6 +299,9 @@ class AdServiceProtocol(Protocol):
     def moderate(self, user: User | None, item_id: int | None) -> None:
         pass
 
+    def read_ads(self, ad_id: int | None = None, only_moderated: bool = False) -> dict | list:
+        pass
+
 
 @app.post("/ads")
 def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdService)):
@@ -289,6 +314,25 @@ def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdS
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     return {"message": "Ad applied successfully", "id": ad_id}
+
+
+@app.get("/ads")
+def read_ads(ad_service: AdServiceProtocol = Depends(AdService)) -> list:
+
+    items = ad_service.read_ads(only_moderated=True)
+
+    return items
+
+
+@app.get("/ads/{item_id}")
+def read_ad(item_id, ad_service: AdServiceProtocol = Depends(AdService)) -> dict:
+
+    try:
+        item = ad_service.read_ads(item_id, only_moderated=True)
+    except ItemRequiredError:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    return item
 
 
 @app.post("/ads/{item_id}/moderate")
