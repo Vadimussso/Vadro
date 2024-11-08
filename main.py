@@ -166,6 +166,11 @@ class UserRequiredError(ValueError):
         super().__init__(message)
 
 
+class ItemRequiredError(ValueError):
+    def __init__(self, message="Item is not represented"):
+        super().__init__(message)
+
+
 class AdRepo:
     def __init__(self, db=Depends(get_db)):
         self.db = db
@@ -193,9 +198,43 @@ class AdRepo:
 
             return cursor.fetchone()['id']
 
+    def fetch_ad_data(self, ad_id: int, only_moderated: bool = False) -> dict | None:
+        query = """
+            SELECT id, vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
+                 FROM ads 
+                 WHERE id = %s
+            """
+
+        if only_moderated:
+            query += " AND is_moderated = true"
+
+        with self.db.cursor() as cursor:
+            cursor.execute(query, [ad_id])
+            item = cursor.fetchone()
+
+        return item
+
+    def moderate(self, item_id: int) -> None:
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE ads SET is_moderated = true
+                WHERE id = %s 
+                """,
+                [item_id]
+            )
+
+            self.db.commit()
+
 
 class AdRepoProtocol(Protocol):
     def insert_ad(self, user_id: int, ad: Ad) -> int:
+        pass
+
+    def fetch_ad_data(self, ad_id: int, only_moderated: bool = False) -> dict | None:
+        pass
+
+    def moderate(self, item_id: int) -> None:
         pass
 
 
@@ -211,9 +250,31 @@ class AdService:
 
         return self.ad_repo.insert_ad(user_id, ad)
 
+    def moderate(self, user: User | None, item_id: int) -> None:
+
+        if not user:
+            raise UserRequiredError("User is required")
+
+        if not user.is_admin:
+            raise PermissionError("Insufficient access rights")
+
+        # fetching the item from db according item_id ID
+        item = self.ad_repo.fetch_ad_data(item_id)
+
+        if item is None:
+            raise ItemRequiredError()
+
+        # getting ID from item which was received according ID for moderation
+        ad_id = item["id"]
+
+        self.ad_repo.moderate(ad_id)
+
 
 class AdServiceProtocol(Protocol):
     def add_ad(self, user_id: int | None, ad: Ad) -> int:
+        pass
+
+    def moderate(self, user: User | None, item_id: int | None) -> None:
         pass
 
 
@@ -231,38 +292,18 @@ def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdS
 
 
 @app.post("/ads/{item_id}/moderate")
-def moderate(item_id: int, request: Request, db=Depends(get_db)):
+def moderate(item_id: int, request: Request, ad_service: AdServiceProtocol = Depends(AdService)):
 
-    # Check id the ad exists
-    with db.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT id FROM ads WHERE id = %s
-            """,
-            [item_id]
-        )
-        ad = cursor.fetchone()
+    user = getattr(request.state, 'user', None)
 
-    if ad is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-
-    # if nothing is returned, an error is returned.
-    if request.state.user is None or not request.state.user.is_admin:
+    try:
+        ad_service.moderate(user, item_id)
+    except UserRequiredError:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    except PermissionError:
         raise HTTPException(status_code=403, detail="Forbidden")
-
-    # if id exists, moderation is allowed
-    with db.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE ads SET is_moderated = true
-            WHERE id = %s
-            """,
-            [item_id]
-        )
-
-        db.commit()
-
-    return {"message": "moderation_completed"}
-
-
+    except ItemRequiredError:
+        raise HTTPException(status_code=404, detail="Item not found")
+    else:
+        return {"message": "moderation_completed"}
 
