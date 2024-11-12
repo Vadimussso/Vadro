@@ -9,7 +9,8 @@ def test_read_ads(client):
 
 @pytest.mark.parametrize("header_tf, status",
                          [(True, 200),
-                          (False, 401)])
+                          (False, 401)
+                          ])
 def test_ad_add(client, header_tf, status, make_user_token, ad_data):
     headers = {}
     if header_tf:
@@ -23,8 +24,8 @@ def test_ad_add(client, header_tf, status, make_user_token, ad_data):
 @pytest.mark.parametrize("ad_exist, user_admin, status",
                          [(False, True, 404),
                           (True, False, 403),
-                          (True, True, 200)]
-                         )
+                          (True, True, 200)
+                          ])
 def test_moderate(client, ad_exist, user_admin, status, make_user_token, ad_data, make_admin_token):
     ad_id = 9999
     headers_user = {"Authorization": f"Bearer {make_user_token}"}

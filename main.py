@@ -28,8 +28,8 @@ class User(UserBase):
     is_admin: bool
 
 
-class LogIn(BaseModel):
-    email: str
+class UserCredentials(BaseModel):
+    email: EmailStr
     password: str
 
 
@@ -47,6 +47,22 @@ class Ad(BaseModel):
     phone: str
 
 
+class UserRequiredError(ValueError):
+    def __init__(self, message="User is required"):
+        super().__init__(message)
+
+
+class UserCredentialsError(ValueError):
+
+    def __init__(self, message="Wrong credentials"):
+        super().__init__(message)
+
+
+class ItemRequiredError(ValueError):
+    def __init__(self, message="Item is not represented"):
+        super().__init__(message)
+
+
 def get_db():
     conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
     try:
@@ -55,27 +71,7 @@ def get_db():
         conn.close()
 
 
-def make_user(user: UserCreate, db):
-    with db.cursor() as cursor:
-        cursor.execute(
-            """INSERT INTO users (email, name, surname, password, is_admin, created_at) 
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, email, name, surname, is_admin""",
-            (user.email, user.name, user.surname, user.password, user.is_admin, datetime.now())
-        )
-        db.commit()
-
-        created_user = cursor.fetchone()
-    return User(**created_user)
-
-
-@app.post("/users/registration")
-def registration(user: UserCreate, db=Depends(get_db)):
-    new_user = make_user(user, db)
-    return {"user_id": new_user.id, "message": "User registered successfully"}
-
-
 def get_current_user(credentials: HTTPAuthorizationCredentials):
-
     token = credentials.credentials
 
     conn = psycopg2.connect(settings.database_url, cursor_factory=RealDictCursor)
@@ -102,7 +98,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials):
 
 @app.middleware("http")
 async def add_user(request: Request, call_next):
-
     # Initialize the user in the request state
     request.state.user = None
 
@@ -118,57 +113,88 @@ async def add_user(request: Request, call_next):
     return response
 
 
-@app.get("/ads")
-def read_ads(db=Depends(get_db)):
-    with db.cursor() as cursor:
-        cursor.execute(
-            """SELECT vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
-            FROM ads
-            WHERE is_moderated = true
-            """)
-        items = cursor.fetchall()
-        return items
+class UserRepoProtocol(Protocol):
+
+    def make_user(self, user: UserCreate) -> User:
+        pass
+
+    def login(self, credentials: UserCredentials) -> dict:
+        pass
 
 
-@app.get("/ads/{item_id}")
-def read_ad(item_id, db=Depends(get_db)):
-    with db.cursor() as cursor:
-        cursor.execute(
-            """SELECT vin, vrc, license_plate, brand, model, mileage, engine_capacity, price, description, city, phone, posted_at
-             FROM ads 
-             WHERE id = %s AND is_moderated = true
-             """, [item_id])
-        item = cursor.fetchone()
-        if item is None:
-            raise HTTPException(status_code=404, detail="Item not found")
-        return item
+class UserRepo:
+
+    def __init__(self, db=Depends(get_db)):
+        self.db = db
+
+    def make_user(self, user: UserCreate) -> User:
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO users (email, name, surname, password, is_admin, created_at) 
+                   VALUES (%s, %s, %s, %s, %s, %s) 
+                   RETURNING id, email, name, surname, is_admin
+                   """,
+                (user.email, user.name, user.surname, user.password, user.is_admin, datetime.now())
+            )
+            self.db.commit()
+
+            created_user = cursor.fetchone()
+        return User(**created_user)
+
+    def login(self, credentials: UserCredentials) -> dict | None:
+        with self.db.cursor() as cursor:
+            # pull token from the database using login and password
+            cursor.execute(
+                "SELECT token FROM users WHERE email = %s AND password = %s",
+                (credentials.email, credentials.password)
+            )
+            res = cursor.fetchone()
+        return res
+
+
+class UserServiceProtocol(Protocol):
+
+    def make_user(self, user: UserCreate) -> User:
+        pass
+
+    def login(self, credentials: UserCredentials) -> dict | None:
+        pass
+
+
+class UserService:
+
+    def __init__(self, user_repo: UserRepoProtocol = Depends(UserRepo)):
+        self.user_repo = user_repo
+
+    def make_user(self, user: UserCreate) -> User:
+        return self.user_repo.make_user(user)
+
+    def login(self, credentials: UserCredentials) -> dict:
+
+        token = self.user_repo.login(credentials)
+
+        if not token:
+            raise UserCredentialsError()
+
+        return token
+
+
+@app.post("/users/registration")
+def registration(user: UserCreate, user_service: UserServiceProtocol = Depends(UserService)) -> dict:
+    new_user = user_service.make_user(user)
+
+    return {"user_id": new_user.id, "message": "User registered successfully"}
 
 
 @app.post("/users/login")
-def login(login: LogIn, db=Depends(get_db)):
-    with db.cursor() as cursor:
-        # pull token from the database using login and password
-        cursor.execute(
-            "SELECT token FROM users WHERE email = %s AND password = %s",
-            (login.email, login.password)
-        )
-        res = cursor.fetchone()
+def login(credentials: UserCredentials, user_service: UserServiceProtocol = Depends(UserService)) -> dict:
 
-    # if nothing is returned then we return an error
-    if res is None:
+    try:
+        token = user_service.login(credentials)
+    # if nothing is returned the error will arise
+    except UserCredentialsError:
         raise HTTPException(status_code=400, detail="Wrong email or password")
-    # otherwise we return the token
-    return res
-
-
-class UserRequiredError(ValueError):
-    def __init__(self, message="User ID is required"):
-        super().__init__(message)
-
-
-class ItemRequiredError(ValueError):
-    def __init__(self, message="Item is not represented"):
-        super().__init__(message)
+    return token
 
 
 class AdRepo:
@@ -304,8 +330,7 @@ class AdServiceProtocol(Protocol):
 
 
 @app.post("/ads")
-def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdService)):
-
+def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdService)) -> dict:
     user_id = getattr(request.state.user, 'id', None)
 
     try:
@@ -318,7 +343,6 @@ def add_ad(ad: Ad, request: Request, ad_service: AdServiceProtocol = Depends(AdS
 
 @app.get("/ads")
 def read_ads(ad_service: AdServiceProtocol = Depends(AdService)) -> list:
-
     items = ad_service.read_ads(only_moderated=True)
 
     return items
@@ -326,7 +350,6 @@ def read_ads(ad_service: AdServiceProtocol = Depends(AdService)) -> list:
 
 @app.get("/ads/{item_id}")
 def read_ad(item_id, ad_service: AdServiceProtocol = Depends(AdService)) -> dict:
-
     try:
         item = ad_service.read_ads(item_id, only_moderated=True)
     except ItemRequiredError:
@@ -336,8 +359,7 @@ def read_ad(item_id, ad_service: AdServiceProtocol = Depends(AdService)) -> dict
 
 
 @app.post("/ads/{item_id}/moderate")
-def moderate(item_id: int, request: Request, ad_service: AdServiceProtocol = Depends(AdService)):
-
+def moderate(item_id: int, request: Request, ad_service: AdServiceProtocol = Depends(AdService)) -> dict:
     user = getattr(request.state, 'user', None)
 
     try:
@@ -350,4 +372,3 @@ def moderate(item_id: int, request: Request, ad_service: AdServiceProtocol = Dep
         raise HTTPException(status_code=404, detail="Item not found")
     else:
         return {"message": "moderation_completed"}
-
